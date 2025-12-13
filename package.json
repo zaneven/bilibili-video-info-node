@@ -5,15 +5,12 @@
   "main": "src/index.js",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit"
+    "deploy": "wrangler deploy"
   },
   "keywords": ["cloudflare", "worker", "bilibili", "api"],
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250514.0",
-    "typescript": "^5.4.5",
     "wrangler": "^3.57.2"
   }
 }
