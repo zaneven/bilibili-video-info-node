@@ -19,16 +19,15 @@ RUN apk add --no-cache \
     libxkbcommon \
     libxkbcommon-dev \
     libxcb \
-    libxcb1-dev \
+    libxcb-dev \
     libxdamage \
     libxext \
     libxfixes \
     libxrender \
     libxrandr \
     libxcomposite \
-    libgbm \
-    mesa-gl \
-    mesa-dri-swrast
+    mesa-gbm \
+    mesa-gl
 
 # 复制 package.json 和 package-lock.json
 COPY package*.json ./
