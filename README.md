@@ -1,65 +1,65 @@
-# Bilibili Video Info Node
+# Bilibili 视频信息获取工具
 
-A Node.js server that fetches basic information about Bilibili videos, including video details and author information, using Puppeteer to simulate browser requests.
+一个基于 Node.js 的服务器，使用 Puppeteer 模拟浏览器请求来获取 Bilibili 视频的基本信息，包括视频详情和作者信息。
 
-## Features
+## 功能特性
 
-- 🚀 Fast and lightweight Node.js server
-- 📦 Easy to deploy and use
-- 🤖 Uses Puppeteer to simulate browser requests
-- 🔒 Secure API with CORS support
-- 📱 Built-in web interface for easy use
-- 🎯 Only returns essential video and author information
+- 🚀 快速轻量的 Node.js 服务器
+- 📦 易于部署和使用
+- 🤖 使用 Puppeteer 模拟浏览器请求
+- 🔒 安全的 API，支持 CORS
+- 📱 内置 Web 界面，方便使用
+- 🎯 只返回必要的视频和作者信息
 
-## Prerequisites
+## 前置条件
 
 - Node.js 18+
-- npm or yarn
-- Chrome browser installed
+- npm 或 yarn
+- 已安装 Chrome 浏览器
 
-## Installation
+## 安装步骤
 
-1. Clone or download this repository
+1. 克隆或下载本仓库
 
-2. Install dependencies:
+2. 安装依赖：
    ```bash
    npm install
    ```
 
-## Development
+## 开发运行
 
-Run the server locally:
+在本地运行服务器：
 
 ```bash
 npm run dev
 ```
 
-The server will be available at `http://localhost:3000`
+服务器将在 `http://localhost:3000` 上运行
 
-## Usage
+## 使用方法
 
-### Web Interface
+### Web 界面
 
-Open your browser and navigate to:
+打开浏览器并导航到：
 ```
 http://localhost:3000
 ```
 
-You can enter a Bilibili video BV号 (e.g., BV1XX4y1C7mz) in the input field to get video information.
+在输入框中输入 Bilibili 视频的 BV 号（例如：BV1XX4y1C7mz）即可获取视频信息。
 
-### API Endpoint
+### API 端点
 
 ```
 http://localhost:3000/api/video-info?bvid=<bilibili-video-id>
 ```
 
-### Example
+### 使用示例
 
 ```bash
 curl "http://localhost:3000/api/video-info?bvid=BV1XX4y1C7mz"
 ```
 
-### Example Response
+### 响应示例
 
 ```json
 {
@@ -88,37 +88,37 @@ curl "http://localhost:3000/api/video-info?bvid=BV1XX4y1C7mz"
 }
 ```
 
-## Project Structure
+## 项目结构
 
 ```
 ├── src/
-│   └── index.js          # Main server code
-├── package.json          # Project dependencies
-└── README.md             # This file
+│   └── index.js          # 主服务器代码
+├── package.json          # 项目依赖
+└── README.md             # 说明文档
 ```
 
-## Configuration
+## 配置选项
 
-The server uses environment variables for configuration:
+服务器使用环境变量进行配置：
 
-- `PORT`: The port to run the server on (default: 3000)
+- `PORT`: 服务器运行的端口（默认：3000）
 
-## Technologies Used
+## 使用技术
 
 - Node.js
 - Express.js
 - Puppeteer
 - JavaScript
 
-## License
+## 许可证
 
 MIT
 
-## Contributing
+## 贡献
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+欢迎贡献代码！请随时提交 Pull Request。
 
-## Acknowledgments
+## 致谢
 
-- Bilibili for their video platform
-- Puppeteer for browser automation
+- Bilibili 提供视频平台
+- Puppeteer 提供浏览器自动化支持
