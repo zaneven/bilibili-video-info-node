@@ -81,7 +81,7 @@ sudo apt-get update && sudo apt-get install -y \
 
 2. 运行 Docker 容器：
    ```bash
-   docker run -d -p 3000:3000 --name bilibili-video-info bilibili-video-info
+   docker run -d -p 3001:3000 --name bilibili-video-info bilibili-video-info
    ```
 
 #### 使用 Docker Compose 部署
@@ -98,7 +98,7 @@ sudo apt-get update && sudo apt-get install -y \
 
 #### 访问应用
 
-部署完成后，应用将在 `http://localhost:3000` 上运行。
+部署完成后，应用将在 `http://localhost:3001` 上运行。
 
 ## 开发运行
 
