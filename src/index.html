@@ -63,12 +63,95 @@
             background-color: #0099cc;
         }
         
-        #result {
+        #videoResult,
+        #upResult {
             background-color: white;
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
             display: none;
+            margin-bottom: 20px;
+        }
+        
+        #videoResult h2,
+        #upResult h2 {
+            margin-bottom: 20px;
+            color: #00aeec;
+        }
+        
+        .input-section h3 {
+            margin-bottom: 10px;
+            color: #333;
+            font-size: 18px;
+        }
+        
+        .up-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .up-desc {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            white-space: pre-wrap;
+        }
+        
+        .up-masterpieces {
+            margin-top: 20px;
+        }
+        
+        .up-masterpieces h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+        
+        #masterpieceList {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .masterpiece-item {
+            border: 1px solid #eee;
+            border-radius: 8px;
+            overflow: hidden;
+            transition: box-shadow 0.3s;
+        }
+        
+        .masterpiece-item:hover {
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        
+        .masterpiece-item img {
+            width: 100%;
+            height: 112px;
+            object-fit: cover;
+        }
+        
+        .masterpiece-info {
+            padding: 10px;
+        }
+        
+        .masterpiece-title {
+            font-size: 14px;
+            font-weight: bold;
+            margin-bottom: 5px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+        
+        .masterpiece-stats {
+            display: flex;
+            gap: 10px;
+            font-size: 12px;
+            color: #666;
         }
         
         .video-card {
@@ -173,18 +256,27 @@
 </head>
 <body>
     <div class="container">
-        <h1>Bilibili 视频信息解析</h1>
+        <h1>Bilibili 信息解析</h1>
         
         <div class="input-section">
+            <h3>视频解析</h3>
             <input type="text" id="bvidInput" placeholder="请输入BV号，例如：BV1XX4y1C7mz">
             <button id="submitBtn">解析视频</button>
         </div>
         
+        <div class="input-section">
+            <h3>UP主解析</h3>
+            <input type="text" id="vmidInput" placeholder="请输入UP主ID，例如：287291651">
+            <button id="upSubmitBtn">解析UP主</button>
+        </div>
+        
         <div class="error" id="errorMsg"></div>
         
-        <div class="loading" id="loading">正在解析视频信息...</div>
+        <div class="loading" id="loading">正在解析...</div>
         
-        <div id="result">
+        <!-- 视频信息结果 -->
+        <div id="videoResult">
+            <h2>视频信息</h2>
             <div class="video-card">
                 <img src="" alt="视频封面" class="video-cover" id="videoCover">
                 <div class="video-info">
@@ -235,12 +327,53 @@
                 <div id="videoDesc"></div>
             </div>
         </div>
+        
+        <!-- UP主信息结果 -->
+        <div id="upResult">
+            <h2>UP主信息</h2>
+            <div class="owner-info">
+                <img src="" alt="UP主头像" class="owner-avatar" id="upAvatar">
+                <div>
+                    <div class="owner-name" id="upName"></div>
+                    <div id="upUid"></div>
+                </div>
+            </div>
+            
+            <div class="up-stats">
+                <div class="stat-item">
+                    <div class="stat-value" id="upFans"></div>
+                    <div class="stat-label">粉丝</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="upVideos"></div>
+                    <div class="stat-label">视频</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="upArticles"></div>
+                    <div class="stat-label">专栏</div>
+                </div>
+            </div>
+            
+            <div class="up-desc">
+                <strong>个人简介：</strong>
+                <div id="upDesc"></div>
+            </div>
+            
+            <div class="up-masterpieces">
+                <h3>代表作</h3>
+                <div id="masterpieceList"></div>
+            </div>
+        </div>
     </div>
     
     <script>
+        // 获取DOM元素
         const bvidInput = document.getElementById('bvidInput');
+        const vmidInput = document.getElementById('vmidInput');
         const submitBtn = document.getElementById('submitBtn');
-        const resultDiv = document.getElementById('result');
+        const upSubmitBtn = document.getElementById('upSubmitBtn');
+        const videoResultDiv = document.getElementById('videoResult');
+        const upResultDiv = document.getElementById('upResult');
         const loadingDiv = document.getElementById('loading');
         const errorDiv = document.getElementById('errorMsg');
         
@@ -263,6 +396,11 @@
             }
         }
         
+        // 格式化数字（添加千分位分隔符）
+        function formatNumber(num) {
+            return num ? num.toLocaleString() : '0';
+        }
+        
         // 解析视频信息
         async function fetchVideoInfo() {
             const bvid = bvidInput.value.trim();
@@ -274,34 +412,114 @@
             }
             
             errorDiv.style.display = 'none';
-            resultDiv.style.display = 'none';
+            videoResultDiv.style.display = 'none';
+            upResultDiv.style.display = 'none';
             loadingDiv.style.display = 'block';
             
             try {
-                const response = await fetch(`?bvid=${bvid}`);
+                const response = await fetch(`/api/video-info?bvid=${bvid}`);
                 const data = await response.json();
                 
                 if (data.error) {
                     throw new Error(data.error);
                 }
                 
-                // 更新页面内容
-                document.getElementById('videoCover').src = data.video.pic;
+                // 更新页面内容，使用代理服务处理图片URL以绕过防盗链限制
+                const baseUrl = window.location.origin;
+                document.getElementById('videoCover').src = baseUrl + '/proxy-image/' + encodeURIComponent(data.video.pic);
                 document.getElementById('videoTitle').textContent = data.video.title;
                 document.getElementById('videoDate').textContent = `发布时间：${formatDate(data.video.pubdate)}`;
                 document.getElementById('videoDuration').textContent = `时长：${formatDuration(data.video.duration)}`;
-                document.getElementById('viewCount').textContent = data.video.view.toLocaleString();
-                document.getElementById('likeCount').textContent = data.video.like.toLocaleString();
-                document.getElementById('coinCount').textContent = data.video.coin.toLocaleString();
-                document.getElementById('favoriteCount').textContent = data.video.favorite.toLocaleString();
-                document.getElementById('danmakuCount').textContent = data.video.danmaku.toLocaleString();
-                document.getElementById('replyCount').textContent = data.video.reply.toLocaleString();
-                document.getElementById('ownerAvatar').src = data.owner.face;
+                document.getElementById('viewCount').textContent = formatNumber(data.video.view);
+                document.getElementById('likeCount').textContent = formatNumber(data.video.like);
+                document.getElementById('coinCount').textContent = formatNumber(data.video.coin);
+                document.getElementById('favoriteCount').textContent = formatNumber(data.video.favorite);
+                document.getElementById('danmakuCount').textContent = formatNumber(data.video.danmaku);
+                document.getElementById('replyCount').textContent = formatNumber(data.video.reply);
+                document.getElementById('ownerAvatar').src = baseUrl + '/proxy-image/' + encodeURIComponent(data.owner.face);
                 document.getElementById('ownerName').textContent = data.owner.name;
                 document.getElementById('ownerId').textContent = `UP主ID：${data.owner.mid}`;
                 document.getElementById('videoDesc').textContent = data.video.desc || '暂无简介';
                 
-                resultDiv.style.display = 'block';
+                videoResultDiv.style.display = 'block';
+            } catch (error) {
+                errorDiv.textContent = `解析失败：${error.message}`;
+                errorDiv.style.display = 'block';
+            } finally {
+                loadingDiv.style.display = 'none';
+            }
+        }
+        
+        // 解析UP主信息
+        async function fetchUpInfo() {
+            const vmid = vmidInput.value.trim();
+            
+            if (!vmid) {
+                errorDiv.textContent = '请输入UP主ID';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            
+            errorDiv.style.display = 'none';
+            videoResultDiv.style.display = 'none';
+            upResultDiv.style.display = 'none';
+            loadingDiv.style.display = 'block';
+            
+            try {
+                // 获取UP主代表作信息
+                const masterpieceResponse = await fetch(`/api/up-masterpiece?vmid=${vmid}`);
+                const masterpieces = await masterpieceResponse.json();
+                
+                if (masterpieces.error) {
+                    throw new Error(masterpieces.error);
+                }
+                
+                if (masterpieces.length === 0) {
+                    throw new Error('未找到该UP主的代表作');
+                }
+                
+                // 使用第一个视频的owner信息作为UP主信息
+                const upInfo = masterpieces[0].owner;
+                
+                // 更新页面内容，使用代理服务处理图片URL以绕过防盗链限制
+                const baseUrl = window.location.origin;
+                
+                // 更新UP主基本信息
+                document.getElementById('upAvatar').src = baseUrl + '/proxy-image/' + encodeURIComponent(upInfo.face);
+                document.getElementById('upName').textContent = upInfo.name;
+                document.getElementById('upUid').textContent = `UP主ID：${upInfo.mid}`;
+                
+                // 简单统计视频数量和专栏数量
+                const videoCount = masterpieces.length;
+                document.getElementById('upVideos').textContent = formatNumber(videoCount);
+                document.getElementById('upArticles').textContent = formatNumber(0); // 暂时无法获取专栏数量
+                document.getElementById('upFans').textContent = formatNumber(0); // 暂时无法获取粉丝数量
+                document.getElementById('upDesc').textContent = '暂无简介'; // 暂时无法获取个人简介
+                
+                // 渲染代表作列表
+                const masterpieceList = document.getElementById('masterpieceList');
+                masterpieceList.innerHTML = '';
+                
+                masterpieces.forEach(video => {
+                    const item = document.createElement('div');
+                    item.className = 'masterpiece-item';
+                    
+                    item.innerHTML = `
+                        <img src="${baseUrl}/proxy-image/${encodeURIComponent(video.pic)}" alt="${video.title}">
+                        <div class="masterpiece-info">
+                            <div class="masterpiece-title">${video.title}</div>
+                            <div class="masterpiece-stats">
+                                <span>播放: ${formatNumber(video.stat.view)}</span>
+                                <span>点赞: ${formatNumber(video.stat.like)}</span>
+                                <span>硬币: ${formatNumber(video.stat.coin)}</span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    masterpieceList.appendChild(item);
+                });
+                
+                upResultDiv.style.display = 'block';
             } catch (error) {
                 errorDiv.textContent = `解析失败：${error.message}`;
                 errorDiv.style.display = 'block';
@@ -315,6 +533,13 @@
         bvidInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 fetchVideoInfo();
+            }
+        });
+        
+        upSubmitBtn.addEventListener('click', fetchUpInfo);
+        vmidInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                fetchUpInfo();
             }
         });
     </script>
