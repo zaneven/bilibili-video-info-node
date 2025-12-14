@@ -1,5 +1,4 @@
-// HTML页面内容
-const HTML_PAGE = `<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -258,10 +257,10 @@ const HTML_PAGE = `<!DOCTYPE html>
             const secs = seconds % 60;
             
             if (hours > 0) {
-                    return hours + ':' + minutes.toString().padStart(2, '0') + ':' + secs.toString().padStart(2, '0');
-                } else {
-                    return minutes + ':' + secs.toString().padStart(2, '0');
-                }
+                return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            } else {
+                return `${minutes}:${secs.toString().padStart(2, '0')}`;
+            }
         }
         
         // 解析视频信息
@@ -279,36 +278,32 @@ const HTML_PAGE = `<!DOCTYPE html>
             loadingDiv.style.display = 'block';
             
             try {
-                // 请求本地服务器，由服务器使用Puppeteer获取视频信息
-                const apiUrl = '/api/video-info?bvid=' + bvid;
-                const response = await fetch(apiUrl);
-                
+                const response = await fetch(`?bvid=${bvid}`);
                 const data = await response.json();
                 
                 if (data.error) {
                     throw new Error(data.error);
                 }
                 
-                // 更新页面内容，使用代理服务处理图片URL以绕过防盗链限制
-                const baseUrl = window.location.origin;
-                document.getElementById('videoCover').src = baseUrl + '/proxy-image/' + encodeURIComponent(data.video.pic);
+                // 更新页面内容
+                document.getElementById('videoCover').src = data.video.pic;
                 document.getElementById('videoTitle').textContent = data.video.title;
-                document.getElementById('videoDate').textContent = '发布时间：' + formatDate(data.video.pubdate);
-                document.getElementById('videoDuration').textContent = '时长：' + formatDuration(data.video.duration);
+                document.getElementById('videoDate').textContent = `发布时间：${formatDate(data.video.pubdate)}`;
+                document.getElementById('videoDuration').textContent = `时长：${formatDuration(data.video.duration)}`;
                 document.getElementById('viewCount').textContent = data.video.view.toLocaleString();
                 document.getElementById('likeCount').textContent = data.video.like.toLocaleString();
                 document.getElementById('coinCount').textContent = data.video.coin.toLocaleString();
                 document.getElementById('favoriteCount').textContent = data.video.favorite.toLocaleString();
                 document.getElementById('danmakuCount').textContent = data.video.danmaku.toLocaleString();
                 document.getElementById('replyCount').textContent = data.video.reply.toLocaleString();
-                document.getElementById('ownerAvatar').src = baseUrl + '/proxy-image/' + encodeURIComponent(data.owner.face);
+                document.getElementById('ownerAvatar').src = data.owner.face;
                 document.getElementById('ownerName').textContent = data.owner.name;
-                document.getElementById('ownerId').textContent = 'UP主ID：' + data.owner.mid;
+                document.getElementById('ownerId').textContent = `UP主ID：${data.owner.mid}`;
                 document.getElementById('videoDesc').textContent = data.video.desc || '暂无简介';
                 
                 resultDiv.style.display = 'block';
             } catch (error) {
-                errorDiv.textContent = '解析失败：' + error.message;
+                errorDiv.textContent = `解析失败：${error.message}`;
                 errorDiv.style.display = 'block';
             } finally {
                 loadingDiv.style.display = 'none';
@@ -324,236 +319,4 @@ const HTML_PAGE = `<!DOCTYPE html>
         });
     </script>
 </body>
-</html>`;
-
-// 引入依赖
-const express = require('express');
-const puppeteer = require('puppeteer');
-
-// 创建Express应用
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-// 启动浏览器实例（全局单例，提高性能）
-let browser;
-
-async function initBrowser() {
-  browser = await puppeteer.launch({
-    headless: "new", // 使用新的无头模式
-    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // 使用系统Chrome
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--single-process',
-      '--disable-gpu'
-    ]
-  });
-  console.log('Puppeteer browser initialized');
-}
-
-// 使用Puppeteer获取视频信息
-async function getVideoInfo(bvid) {
-  try {
-    if (!browser) {
-      await initBrowser();
-    }
-    
-    const page = await browser.newPage();
-    
-    // 设置User-Agent和其他必要的header
-    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0');
-    
-    // 直接访问视频信息API
-    let videoData = null;
-    const apiUrl = `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`;
-    
-    try {
-      console.log('Directly accessing API:', apiUrl);
-      // 直接在页面中发起fetch请求
-      videoData = await page.evaluate(async (url) => {
-        try {
-          const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-              'Accept': 'application/json, text/plain, */*',
-              'Referer': `https://www.bilibili.com/video/${bvid}/`,
-              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0'
-            },
-            credentials: 'include'
-          });
-          const data = await response.json();
-          console.log('Direct API Response:', data);
-          return data;
-        } catch (error) {
-          console.error('Direct API request failed:', error);
-          return null;
-        }
-      }, apiUrl);
-    } catch (error) {
-      console.error('Error in page.evaluate:', error);
-    }
-    
-    // 如果直接API请求失败，尝试通过页面加载获取
-    if (!videoData || videoData.code !== 0) {
-      console.log('Direct API failed, trying page load approach...');
-      
-      // 访问B站视频页面
-      await page.goto(`https://www.bilibili.com/video/${bvid}/`, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000
-      });
-      
-      // 尝试从页面中提取数据
-      videoData = await page.evaluate(() => {
-        // 尝试从window.__INITIAL_STATE__获取数据
-        if (window.__INITIAL_STATE__) {
-          console.log('Found __INITIAL_STATE__');
-          return {
-            code: 0,
-            data: window.__INITIAL_STATE__.videoData
-          };
-        }
-        
-        // 尝试从其他可能的全局变量获取数据
-        if (window.__data) {
-          console.log('Found __data');
-          return {
-            code: 0,
-            data: window.__data
-          };
-        }
-        
-        console.log('No initial state found');
-        return null;
-      }).catch(e => {
-        console.error('Failed to extract data from page:', e);
-        return null;
-      });
-    }
-    
-    await page.close();
-    
-    if (!videoData || videoData.code !== 0 || !videoData.data) {
-      throw new Error('Failed to fetch video info');
-    }
-    
-    console.log('Final Video Data:', JSON.stringify(videoData, null, 2));
-    
-    // 提取需要的视频和作者信息，添加安全检查
-    const video = videoData.data;
-    const stat = video.stat || {};
-    const owner = video.owner || {};
-    
-    const filteredData = {
-      video: {
-        bvid: video.bvid || '',
-        aid: video.aid || '',
-        title: video.title || '',
-        desc: video.desc || '',
-        pic: video.pic || '',
-        duration: video.duration || 0,
-        pubdate: video.pubdate || 0,
-        ctime: video.ctime || 0,
-        view: stat.view || 0,
-        danmaku: stat.danmaku || 0,
-        reply: stat.reply || 0,
-        favorite: stat.favorite || 0,
-        coin: stat.coin || 0,
-        share: stat.share || 0,
-        like: stat.like || 0
-      },
-      owner: {
-        mid: owner.mid || '',
-        name: owner.name || '',
-        face: owner.face || ''
-      }
-    };
-    
-    return filteredData;
-  } catch (error) {
-    console.error('Error fetching video info:', error);
-    throw error;
-  }
-}
-
-// CORS中间件
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  next();
-});
-
-// 处理OPTIONS请求
-app.options('*', (req, res) => {
-  res.sendStatus(200);
-});
-
-// 根路径返回HTML页面
-app.get('/', (req, res) => {
-  res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(HTML_PAGE);
-});
-
-// 视频信息API
-app.get('/api/video-info', async (req, res) => {
-  try {
-    const bvid = req.query.bvid;
-    
-    if (!bvid) {
-      return res.status(400).json({ error: 'Missing bvid parameter' });
-    }
-    
-    const videoInfo = await getVideoInfo(bvid);
-    res.json(videoInfo);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// 图片代理路由
-app.get('/proxy-image/:encodedUrl', async (req, res) => {
-  try {
-    const encodedImageUrl = req.params.encodedUrl;
-    const imageUrl = decodeURIComponent(encodedImageUrl);
-    
-    // 转发请求到原始图片URL
-    const response = await fetch(imageUrl);
-    
-    // 返回图片响应
-    res.setHeader('Content-Type', response.headers.get('Content-Type'));
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.send(await response.buffer());
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// 启动服务器
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-  // 初始化浏览器
-  initBrowser().catch(error => {
-    console.error('Failed to initialize browser:', error);
-    process.exit(1);
-  });
-});
-
-// 优雅关闭
-process.on('SIGINT', async () => {
-  if (browser) {
-    await browser.close();
-  }
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  if (browser) {
-    await browser.close();
-  }
-  process.exit(0);
-});
+</html>

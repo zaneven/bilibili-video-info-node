@@ -1,13 +1,10 @@
 name = "bilibili-video-info-worker"
 main = "src/index.js"
 compatibility_date = "2025-05-14"
-node_compat = true
+compatibility_flags = ["nodejs_compat"]
 
 [[vars]]
 ORIGIN = "https://api.bilibili.com"
-
-[dev]
-env = "dev"
 
 [env.production]
 name = "bilibili-video-info-worker-production"
