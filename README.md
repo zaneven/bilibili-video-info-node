@@ -26,6 +26,43 @@
    npm install
    ```
 
+## 部署说明
+
+### 本地开发环境
+
+在本地开发时，应用会使用系统已安装的 Chrome 浏览器。
+
+### 服务器环境
+
+在服务器环境中部署时，Puppeteer 会自动下载并使用兼容的浏览器版本。请确保：
+
+1. 服务器有足够的存储空间（约 500MB）用于下载浏览器
+2. 服务器可以访问互联网以下载浏览器
+3. 安装依赖时不要使用 `PUPPETEER_SKIP_DOWNLOAD=true` 环境变量
+4. 确保服务器已安装必要的依赖库（如 libnss3、libatk1.0-0 等）
+
+对于 Ubuntu 服务器，可以安装以下依赖：
+```bash
+sudo apt-get update && sudo apt-get install -y \
+  libnss3 \
+  libatk1.0-0 \
+  libatk-bridge2.0-0 \
+  libcups2 \
+  libdbus-1-3 \
+  libdrm2 \
+  libxkbcommon0 \
+  libgbm1 \
+  libasound2 \
+  libatspi2.0-0 \
+  libx11-xcb1 \
+  libxcb-dri3-0 \
+  libxcomposite1 \
+  libxdamage1 \
+  libxfixes3 \
+  libxrandr2 \
+  libxrender1
+```
+
 ## 开发运行
 
 在本地运行服务器：
