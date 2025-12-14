@@ -340,7 +340,6 @@ let browser;
 async function initBrowser() {
   browser = await puppeteer.launch({
     headless: "new", // 使用新的无头模式
-    executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', // 使用系统Chrome
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -348,7 +347,6 @@ async function initBrowser() {
       '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--no-zygote',
-      '--single-process',
       '--disable-gpu'
     ]
   });
