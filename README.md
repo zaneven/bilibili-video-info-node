@@ -86,19 +86,39 @@ sudo apt-get update && sudo apt-get install -y \
 
 #### 使用 Docker Compose 部署
 
-1. 运行容器：
+1. 确保 `docker-compose.yml` 文件存在
+
+2. 运行容器：
    ```bash
    docker-compose up -d
    ```
 
-2. 停止容器：
+3. 停止容器：
    ```bash
    docker-compose down
+   ```
+
+4. 重新构建并运行：
+   ```bash
+   docker-compose up -d --build
    ```
 
 #### 访问应用
 
 部署完成后，应用将在 `http://localhost:3001` 上运行。
+
+#### 常见问题解决
+
+1. **容器启动失败，报错 "Cannot find module 'express'"**
+   - 解决方案：确保在构建镜像时正确安装了依赖，使用 `docker-compose up -d --build` 重新构建镜像
+   - 不要在 `docker-compose.yml` 中挂载本地目录到容器的 `/app` 目录，这会覆盖容器内已安装的依赖
+
+2. **容器无法访问互联网**
+   - 解决方案：检查 Docker 网络设置，确保容器可以访问互联网以下载浏览器和访问B站API
+
+3. **Puppeteer 无法启动浏览器**
+   - 解决方案：确保 Docker 容器有足够的权限，特别是 `--no-sandbox` 参数已正确配置
+   - 检查 Docker 日志，查看具体错误信息
 
 ## 开发运行
 
