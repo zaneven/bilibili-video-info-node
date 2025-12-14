@@ -338,19 +338,33 @@ const PORT = process.env.PORT || 3000;
 let browser;
 
 async function initBrowser() {
-  browser = await puppeteer.launch({
-    headless: "new", // 使用新的无头模式
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--disable-gpu'
-    ]
-  });
-  console.log('Puppeteer browser initialized');
+  try {
+    // 尝试使用本地Chrome浏览器，如果失败则回退到Puppeteer自动下载
+    browser = await puppeteer.launch({
+      headless: "new", // 使用新的无头模式
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu'
+      ]
+    });
+    console.log('Puppeteer browser initialized');
+  } catch (error) {
+    console.warn('Failed to launch Chrome, trying with fallback options:', error.message);
+    // 使用Puppeteer的默认配置，让它自动下载浏览器
+    browser = await puppeteer.launch({
+      headless: "new",
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox'
+      ]
+    });
+    console.log('Puppeteer browser initialized with fallback options');
+  }
 }
 
 // 使用Puppeteer获取视频信息
@@ -603,8 +617,13 @@ app.get('/proxy-image/:encodedUrl', async (req, res) => {
     // 返回图片响应
     res.setHeader('Content-Type', response.headers.get('Content-Type'));
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.send(await response.buffer());
+    
+    // 使用arrayBuffer()替代buffer()，然后转换为Buffer
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    res.send(buffer);
   } catch (error) {
+    console.error('Error in proxy-image route:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -612,11 +631,8 @@ app.get('/proxy-image/:encodedUrl', async (req, res) => {
 // 启动服务器
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
-  // 初始化浏览器
-  initBrowser().catch(error => {
-    console.error('Failed to initialize browser:', error);
-    process.exit(1);
-  });
+  // 不立即初始化浏览器，只在需要时初始化
+  console.log('Browser will be initialized on first request');
 });
 
 // 优雅关闭
