@@ -63,6 +63,43 @@ sudo apt-get update && sudo apt-get install -y \
   libxrender1
 ```
 
+### Docker 部署（推荐）
+
+使用 Docker 部署是最便捷的方式，应用包含完整的运行环境，包括浏览器。
+
+#### 前置条件
+
+- Docker 已安装
+- Docker Compose（可选，推荐）
+
+#### 使用 Docker 命令部署
+
+1. 构建 Docker 镜像：
+   ```bash
+   docker build -t bilibili-video-info .
+   ```
+
+2. 运行 Docker 容器：
+   ```bash
+   docker run -d -p 3000:3000 --name bilibili-video-info bilibili-video-info
+   ```
+
+#### 使用 Docker Compose 部署
+
+1. 运行容器：
+   ```bash
+   docker-compose up -d
+   ```
+
+2. 停止容器：
+   ```bash
+   docker-compose down
+   ```
+
+#### 访问应用
+
+部署完成后，应用将在 `http://localhost:3000` 上运行。
+
 ## 开发运行
 
 在本地运行服务器：
