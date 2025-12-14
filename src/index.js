@@ -411,6 +411,197 @@ async function getUpMasterpiece(vmid) {
   }
 }
 
+// 获取UP主个人信息
+async function getUpInfo(vmid) {
+  try {
+    // 直接访问UP主信息API，在Node.js环境中直接请求
+    let upData = null;
+    const apiUrl = `https://api.bilibili.com/x/space/wbi/acc/info?mid=${vmid}&token=&platform=web&web_location=1550101`;
+    
+    try {
+      console.log('Directly accessing UP info API:', apiUrl);
+      // 在Node.js环境中直接请求
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': `https://space.bilibili.com/${vmid}`,
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0'
+        }
+      });
+      
+      const data = await response.json();
+      console.log('UP Info API Response:', JSON.stringify(data, null, 2));
+      
+      if (data.code === 0) {
+        upData = data;
+      } else {
+        console.warn('API returned non-zero code:', data.code, data.message);
+      }
+    } catch (error) {
+      console.error('Direct UP info API request failed:', error);
+    }
+    
+    // 如果直接API请求失败，尝试使用Puppeteer
+    if (!upData || upData.code !== 0) {
+      console.log('Direct API failed, trying page load approach...');
+      
+      if (!browser) {
+        await initBrowser();
+      }
+      
+      const page = await browser.newPage();
+      
+      // 设置User-Agent和其他必要的header
+      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0');
+      
+      // 访问UP主空间页面
+      await page.goto(`https://space.bilibili.com/${vmid}`, {
+        waitUntil: 'networkidle2',
+        timeout: 60000
+      });
+      
+      // 等待一段时间确保所有数据加载完成
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // 尝试从页面中提取数据
+      upData = await page.evaluate(() => {
+        console.log('Checking for UP info data in page...');
+        
+        // 1. 尝试从window.__INITIAL_STATE__获取数据
+        if (window.__INITIAL_STATE__) {
+          console.log('Found __INITIAL_STATE__');
+          const initialState = window.__INITIAL_STATE__;
+          console.log('Initial State keys:', Object.keys(initialState));
+          
+          // 检查user或相关属性
+          if (initialState.user) {
+            console.log('Found user in __INITIAL_STATE__');
+            return {
+              code: 0,
+              data: initialState.user
+            };
+          } else if (initialState.cards && initialState.cards[0]) {
+            console.log('Found cards in __INITIAL_STATE__');
+            return {
+              code: 0,
+              data: initialState.cards[0]
+            };
+          }
+        }
+        
+        // 2. 尝试从页面元素中提取数据
+        try {
+          // 尝试多种选择器组合，适应不同的页面结构
+          let ownerAvatar = '';
+          let ownerName = '';
+          let ownerId = '';
+          let fans = 0;
+          let videos = 0;
+          let likes = 0;
+          let sign = '';
+          
+          // 尝试获取头像
+          ownerAvatar = document.querySelector('.user-avatar img')?.src || 
+                        document.querySelector('.header-face img')?.src || 
+                        document.querySelector('.up-avatar img')?.src || 
+                        document.querySelector('[class*="avatar"] img')?.src || '';
+          
+          // 尝试获取用户名
+          ownerName = document.querySelector('.username')?.textContent || 
+                      document.querySelector('.name-text')?.textContent || 
+                      document.querySelector('.user-name')?.textContent || 
+                      document.querySelector('[class*="name"]')?.textContent || '';
+          
+          // 尝试获取用户ID
+          ownerId = document.querySelector('.user-id')?.textContent || 
+                    document.querySelector('.up-id')?.textContent || 
+                    document.querySelector('.uid')?.textContent || '';
+          
+          // 尝试获取个人签名
+          sign = document.querySelector('.user-sign')?.textContent || 
+                 document.querySelector('.sign')?.textContent || 
+                 document.querySelector('.intro')?.textContent || '';
+          
+          // 尝试获取统计数据，适应不同的页面结构
+          const statElements = document.querySelectorAll('.stat-item, .data-item, .up-data__content');
+          
+          // 尝试从各种可能的位置提取统计数据
+          if (statElements.length > 0) {
+            statElements.forEach(element => {
+              const text = element.textContent || '';
+              const parent = element.parentElement?.textContent || '';
+              
+              if (text.includes('粉丝') || parent.includes('粉丝')) {
+                fans = text.replace(/[^0-9]/g, '') || '0';
+              } else if (text.includes('视频') || parent.includes('视频')) {
+                videos = text.replace(/[^0-9]/g, '') || '0';
+              } else if (text.includes('获赞') || parent.includes('获赞') || text.includes('点赞')) {
+                likes = text.replace(/[^0-9]/g, '') || '0';
+              }
+            });
+          }
+          
+          // 尝试另一种方式获取统计数据
+          const followerElement = document.querySelector('.follower-count') || 
+                                 document.querySelector('[class*="follower"]') || 
+                                 document.querySelector('[title*="粉丝"]');
+          if (followerElement) {
+            fans = followerElement.textContent.replace(/[^0-9]/g, '') || '0';
+          }
+          
+          const videoElement = document.querySelector('.video-count') || 
+                              document.querySelector('[class*="video"]') || 
+                              document.querySelector('[title*="视频"]');
+          if (videoElement) {
+            videos = videoElement.textContent.replace(/[^0-9]/g, '') || '0';
+          }
+          
+          // 清理数据
+          const cleanId = ownerId.replace(/[\s\nUID:uid:]/g, '') || '';
+          const cleanFans = parseInt(fans) || 0;
+          const cleanVideos = parseInt(videos) || 0;
+          const cleanLikes = parseInt(likes) || 0;
+          
+          return {
+            code: 0,
+            data: {
+              face: ownerAvatar,
+              name: ownerName.trim(),
+              mid: cleanId,
+              sign: sign.trim(),
+              follower: cleanFans,
+              video: cleanVideos,
+              likes: cleanLikes
+            }
+          };
+        } catch (e) {
+          console.error('Failed to extract data from page elements:', e);
+          return null;
+        }
+      }).catch(e => {
+        console.error('Failed to extract UP info from page:', e);
+        return null;
+      });
+      
+      await page.close();
+    }
+    
+    if (!upData || upData.code !== 0) {
+      throw new Error('Failed to fetch UP info');
+    }
+    
+    console.log('Final UP Info Data:', JSON.stringify(upData, null, 2));
+    
+    // 返回UP主信息数据
+    return upData.data;
+  } catch (error) {
+    console.error('Error fetching UP info:', error);
+    console.error('Error stack:', error.stack);
+    throw error;
+  }
+}
+
 // CORS中间件
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -456,6 +647,22 @@ app.get('/api/up-masterpiece', async (req, res) => {
     }
     
     const upInfo = await getUpMasterpiece(vmid);
+    res.json(upInfo);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// UP主个人信息API
+app.get('/api/up-info', async (req, res) => {
+  try {
+    const vmid = req.query.vmid;
+    
+    if (!vmid) {
+      return res.status(400).json({ error: 'Missing vmid parameter' });
+    }
+    
+    const upInfo = await getUpInfo(vmid);
     res.json(upInfo);
   } catch (error) {
     res.status(500).json({ error: error.message });

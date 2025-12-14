@@ -466,6 +466,14 @@
             loadingDiv.style.display = 'block';
             
             try {
+                // 获取UP主详细信息
+                const upInfoResponse = await fetch(`/api/up-info?vmid=${vmid}`);
+                const upInfo = await upInfoResponse.json();
+                
+                if (upInfo.error) {
+                    throw new Error(upInfo.error);
+                }
+                
                 // 获取UP主代表作信息
                 const masterpieceResponse = await fetch(`/api/up-masterpiece?vmid=${vmid}`);
                 const masterpieces = await masterpieceResponse.json();
@@ -474,50 +482,48 @@
                     throw new Error(masterpieces.error);
                 }
                 
-                if (masterpieces.length === 0) {
-                    throw new Error('未找到该UP主的代表作');
-                }
-                
-                // 使用第一个视频的owner信息作为UP主信息
-                const upInfo = masterpieces[0].owner;
-                
                 // 更新页面内容，使用代理服务处理图片URL以绕过防盗链限制
                 const baseUrl = window.location.origin;
                 
                 // 更新UP主基本信息
-                document.getElementById('upAvatar').src = baseUrl + '/proxy-image/' + encodeURIComponent(upInfo.face);
-                document.getElementById('upName').textContent = upInfo.name;
-                document.getElementById('upUid').textContent = `UP主ID：${upInfo.mid}`;
+                document.getElementById('upAvatar').src = baseUrl + '/proxy-image/' + encodeURIComponent(upInfo.face || upInfo.headerFace || '');
+                document.getElementById('upName').textContent = upInfo.name || upInfo.uname || '未知UP主';
+                document.getElementById('upUid').textContent = `UP主ID：${upInfo.mid || upInfo.uid || vmid}`;
                 
-                // 简单统计视频数量和专栏数量
-                const videoCount = masterpieces.length;
-                document.getElementById('upVideos').textContent = formatNumber(videoCount);
-                document.getElementById('upArticles').textContent = formatNumber(0); // 暂时无法获取专栏数量
-                document.getElementById('upFans').textContent = formatNumber(0); // 暂时无法获取粉丝数量
-                document.getElementById('upDesc').textContent = '暂无简介'; // 暂时无法获取个人简介
+                // 更新UP主统计信息
+                document.getElementById('upVideos').textContent = formatNumber(upInfo.video || upInfo.stat?.video_count || masterpieces.length || 0);
+                document.getElementById('upArticles').textContent = formatNumber(upInfo.article || upInfo.stat?.article_count || 0);
+                document.getElementById('upFans').textContent = formatNumber(upInfo.follower || upInfo.stat?.follower || 0);
+                
+                // 更新UP主简介
+                document.getElementById('upDesc').textContent = upInfo.sign || upInfo.intro || '暂无简介';
                 
                 // 渲染代表作列表
                 const masterpieceList = document.getElementById('masterpieceList');
                 masterpieceList.innerHTML = '';
                 
-                masterpieces.forEach(video => {
-                    const item = document.createElement('div');
-                    item.className = 'masterpiece-item';
-                    
-                    item.innerHTML = `
-                        <img src="${baseUrl}/proxy-image/${encodeURIComponent(video.pic)}" alt="${video.title}">
-                        <div class="masterpiece-info">
-                            <div class="masterpiece-title">${video.title}</div>
-                            <div class="masterpiece-stats">
-                                <span>播放: ${formatNumber(video.stat.view)}</span>
-                                <span>点赞: ${formatNumber(video.stat.like)}</span>
-                                <span>硬币: ${formatNumber(video.stat.coin)}</span>
+                if (masterpieces.length > 0) {
+                    masterpieces.forEach(video => {
+                        const item = document.createElement('div');
+                        item.className = 'masterpiece-item';
+                        
+                        item.innerHTML = `
+                            <img src="${baseUrl}/proxy-image/${encodeURIComponent(video.pic)}" alt="${video.title}">
+                            <div class="masterpiece-info">
+                                <div class="masterpiece-title">${video.title}</div>
+                                <div class="masterpiece-stats">
+                                    <span>播放: ${formatNumber(video.stat.view)}</span>
+                                    <span>点赞: ${formatNumber(video.stat.like)}</span>
+                                    <span>硬币: ${formatNumber(video.stat.coin)}</span>
+                                </div>
                             </div>
-                        </div>
-                    `;
-                    
-                    masterpieceList.appendChild(item);
-                });
+                        `;
+                        
+                        masterpieceList.appendChild(item);
+                    });
+                } else {
+                    masterpieceList.innerHTML = '<p>暂无代表作数据</p>';
+                }
                 
                 upResultDiv.style.display = 'block';
             } catch (error) {
