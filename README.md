@@ -123,17 +123,19 @@ http://localhost:3000
 
 ### API 端点
 
+#### 获取视频信息
+
 ```
 http://localhost:3000/api/video-info?bvid=<bilibili-video-id>
 ```
 
-### 使用示例
+#### 使用示例
 
 ```bash
 curl "http://localhost:3000/api/video-info?bvid=BV1XX4y1C7mz"
 ```
 
-### 响应示例
+#### 响应示例
 
 ```json
 {
@@ -161,6 +163,52 @@ curl "http://localhost:3000/api/video-info?bvid=BV1XX4y1C7mz"
   }
 }
 ```
+
+#### 获取UP主代表作
+
+```
+http://localhost:3000/api/up-masterpiece?vmid=<up-master-id>
+```
+
+#### 使用示例
+
+```bash
+curl "http://localhost:3000/api/up-masterpiece?vmid=287291651"
+```
+
+#### 响应示例
+
+```json
+[
+  {
+    "aid": 775367388,
+    "videos": 1,
+    "tid": 126,
+    "tname": "人力VOCALOID",
+    "copyright": 1,
+    "pic": "http://i1.hdslb.com/bfs/archive/423dcf3d3cae6b5fc4737a167223a558d4c4ec88.jpg",
+    "title": "【b站独家原版】哈基米调音-《两个笨蛋》",
+    "pubdate": 1668852000,
+    "ctime": 1668843503,
+    "desc": "春原的专属BGM\n调教工具：Melodyne Studio 4、AU\n视频素材：赛马娘动画版\n伴奏： Clannad bgm -马鹿ふたり 曲速122",
+    "duration": 32,
+    "owner": {
+      "mid": 287291651,
+      "name": "京桥刹那",
+      "face": "https://i2.hdslb.com/bfs/face/92f95e272607825b1ed909d2a84824c4d9a1ed88.jpg"
+    },
+    "stat": {
+      "aid": 775367388,
+      "view": 3208856,
+      "danmaku": 18289,
+      "reply": 12350,
+      "favorite": 87691,
+      "coin": 69399,
+      "share": 30119,
+      "like": 198623
+    }
+  }
+]
 
 ## 项目结构
 

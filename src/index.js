@@ -570,6 +570,132 @@ async function getVideoInfo(bvid) {
   }
 }
 
+// 获取UP主代表作信息
+async function getUpMasterpiece(vmid) {
+  try {
+    // 直接访问UP主代表作API，在Node.js环境中直接请求
+    let masterpieceData = null;
+    const apiUrl = `https://api.bilibili.com/x/space/masterpiece?vmid=${vmid}&web_location=333.1387`;
+    
+    try {
+      console.log('Directly accessing UP masterpiece API:', apiUrl);
+      // 在Node.js环境中直接请求
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': `https://space.bilibili.com/${vmid}`,
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0'
+        }
+      });
+      
+      const data = await response.json();
+      console.log('UP Masterpiece API Response:', JSON.stringify(data, null, 2));
+      
+      if (data.code === 0) {
+        masterpieceData = data;
+      }
+    } catch (error) {
+      console.error('Direct UP masterpiece API request failed:', error);
+      
+      // 如果直接API请求失败，尝试使用Puppeteer
+      if (!browser) {
+        await initBrowser();
+      }
+      
+      const page = await browser.newPage();
+      
+      // 设置User-Agent和其他必要的header
+      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0');
+      
+      // 访问UP主空间页面
+      await page.goto(`https://space.bilibili.com/${vmid}`, {
+        waitUntil: 'networkidle2',
+        timeout: 60000
+      });
+      
+      // 等待一段时间确保所有数据加载完成
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // 尝试从页面中提取数据
+      masterpieceData = await page.evaluate(() => {
+        console.log('Checking for UP masterpiece data in page...');
+        
+        // 1. 尝试从window.__INITIAL_STATE__获取数据
+        if (window.__INITIAL_STATE__) {
+          console.log('Found __INITIAL_STATE__');
+          const initialState = window.__INITIAL_STATE__;
+          console.log('Initial State keys:', Object.keys(initialState));
+          
+          // 检查masterpiece或相关属性
+          if (initialState.masterpiece) {
+            console.log('Found masterpiece in __INITIAL_STATE__');
+            return {
+              code: 0,
+              data: initialState.masterpiece
+            };
+          } else if (initialState.videos) {
+            console.log('Found videos in __INITIAL_STATE__');
+            return {
+              code: 0,
+              data: initialState.videos
+            };
+          } else if (initialState.cards) {
+            console.log('Found cards in __INITIAL_STATE__');
+            return {
+              code: 0,
+              data: initialState.cards
+            };
+          }
+        }
+        
+        // 2. 尝试从script标签中提取数据
+        const scriptTags = Array.from(document.querySelectorAll('script'));
+        for (const script of scriptTags) {
+          try {
+            const content = script.textContent;
+            if (content.includes('masterpiece')) {
+              // 尝试提取masterpiece数据
+              const masterpieceMatch = content.match(/masterpiece:\s*(\[[^\]]+\])/);
+              if (masterpieceMatch && masterpieceMatch[1]) {
+                console.log('Found masterpiece data in script tag');
+                const data = JSON.parse(masterpieceMatch[1]);
+                return {
+                  code: 0,
+                  data: data
+                };
+              }
+            }
+          } catch (e) {
+            // 忽略解析错误
+          }
+        }
+        
+        console.log('No masterpiece data found in page');
+        return null;
+      }).catch(e => {
+        console.error('Failed to extract masterpiece data from page:', e);
+        return null;
+      });
+      
+      await page.close();
+    }
+    
+    if (!masterpieceData || masterpieceData.code !== 0) {
+      throw new Error('Failed to fetch UP masterpiece info');
+    }
+    
+    console.log('Final UP Masterpiece Data:', JSON.stringify(masterpieceData, null, 2));
+    
+    // 返回原始数据，因为数据结构已经符合要求
+    return masterpieceData.data;
+  } catch (error) {
+    console.error('Error fetching UP masterpiece info:', error);
+    console.error('Error stack:', error.stack);
+    throw error;
+  }
+}
+
 // CORS中间件
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -600,6 +726,22 @@ app.get('/api/video-info', async (req, res) => {
     
     const videoInfo = await getVideoInfo(bvid);
     res.json(videoInfo);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// UP主代表作API
+app.get('/api/up-masterpiece', async (req, res) => {
+  try {
+    const vmid = req.query.vmid;
+    
+    if (!vmid) {
+      return res.status(400).json({ error: 'Missing vmid parameter' });
+    }
+    
+    const upInfo = await getUpMasterpiece(vmid);
+    res.json(upInfo);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
