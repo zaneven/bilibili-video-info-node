@@ -23,6 +23,8 @@ const PORT = process.env.PORT || 3000;
 
 // 启动浏览器实例（全局单例，提高性能）
 let browser;
+let pagePool = []; // 页面池，用于复用页面，减少创建和关闭的开销
+const MAX_POOL_SIZE = 3; // 最大页面池大小
 
 async function initBrowser() {
   try {
@@ -59,8 +61,12 @@ async function initBrowser() {
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-zygote',
-        '--disable-gpu'
-      ]
+        '--disable-gpu',
+        '--disable-extensions', // 禁用扩展，减少资源消耗
+        '--disable-features=site-per-process' // 减少进程创建，提高性能
+      ],
+      defaultViewport: { width: 1280, height: 720 }, // 设置默认视口，减少调整开销
+      ignoreHTTPSErrors: true // 忽略HTTPS错误，减少处理时间
     });
     console.log('Puppeteer browser initialized');
   } catch (error) {
@@ -71,7 +77,9 @@ async function initBrowser() {
         headless: "new",
         args: [
           '--no-sandbox',
-          '--disable-setuid-sandbox'
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-extensions'
         ]
       });
       console.log('Puppeteer browser initialized with default options');
@@ -82,6 +90,39 @@ async function initBrowser() {
   }
 }
 
+// 获取页面（从池或创建新页面）
+async function getPage() {
+  if (pagePool.length > 0) {
+    return pagePool.pop();
+  }
+  
+  if (!browser) {
+    await initBrowser();
+  }
+  
+  const page = await browser.newPage();
+  // 设置User-Agent，避免重复设置
+  await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0');
+  
+  return page;
+}
+
+// 回收页面到池
+async function recyclePage(page) {
+  if (pagePool.length < MAX_POOL_SIZE) {
+    try {
+      // 清空页面，准备复用
+      await page.goto('about:blank');
+      pagePool.push(page);
+    } catch (error) {
+      console.error('Error recycling page:', error);
+      await page.close(); // 直接关闭页面，避免无限递归
+    }
+  } else {
+    await page.close();
+  }
+}
+
 // 使用Puppeteer获取视频信息
 async function getVideoInfo(bvid) {
   try {
@@ -89,18 +130,17 @@ async function getVideoInfo(bvid) {
       await initBrowser();
     }
     
-    const page = await browser.newPage();
+    const page = await getPage(); // 从页面池获取页面，减少创建开销
     
-    // 设置User-Agent和其他必要的header
-    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0');
+    // 移除重复的User-Agent设置，已经在getPage中设置
     
-    // 启用网络请求日志，查看所有B站API请求
-    page.on('response', async (response) => {
-      const url = response.url();
-      if (url.includes('api.bilibili.com/x/web-interface/view?bvid=')) {
-        console.log('Found video info API response:', url);
-      }
-    });
+    // 移除网络请求日志，减少性能开销
+    // page.on('response', async (response) => {
+    //   const url = response.url();
+    //   if (url.includes('api.bilibili.com/x/web-interface/view?bvid=')) {
+    //     console.log('Found video info API response:', url);
+    //   }
+    // });
     
     // 直接访问视频信息API，不使用page.evaluate，改为在Node.js环境中直接请求
     let videoData = null;
@@ -119,7 +159,7 @@ async function getVideoInfo(bvid) {
       });
       
       const data = await response.json();
-      console.log('Direct API Response:', JSON.stringify(data, null, 2));
+      console.log('Direct API Response status:', data.code);
       
       if (data.code === 0) {
         videoData = data;
@@ -134,12 +174,11 @@ async function getVideoInfo(bvid) {
       
       // 访问B站视频页面
       await page.goto(`https://www.bilibili.com/video/${bvid}/`, {
-        waitUntil: 'networkidle2', // 等待更多网络请求完成
-        timeout: 60000
+        waitUntil: 'domcontentloaded', // 只等待DOM加载完成，减少等待时间
+        timeout: 30000
       });
       
-      // 等待一段时间确保所有数据加载完成
-      await new Promise(resolve => setTimeout(resolve, 3000));
+
       
       // 尝试从页面中提取数据，使用更广泛的方法
       videoData = await page.evaluate(() => {
@@ -216,13 +255,14 @@ async function getVideoInfo(bvid) {
       });
     }
     
-    await page.close();
+    await recyclePage(page); // 回收页面到池，实现复用
     
     if (!videoData || videoData.code !== 0 || !videoData.data) {
       throw new Error('Failed to fetch video info');
     }
     
-    console.log('Final Video Data:', JSON.stringify(videoData, null, 2));
+    console.log('Final Video Data retrieved successfully');
+    // 移除详细的JSON日志，提高性能
     
     // 提取需要的视频和作者信息，添加安全检查
     const video = videoData.data;
@@ -316,7 +356,7 @@ async function getUpMasterpiece(vmid) {
       });
       
       const data = await response.json();
-      console.log('UP Masterpiece API Response:', JSON.stringify(data, null, 2));
+      console.log('UP Masterpiece API Response status:', data.code);
       
       if (data.code === 0) {
         masterpieceData = data;
@@ -329,19 +369,17 @@ async function getUpMasterpiece(vmid) {
         await initBrowser();
       }
       
-      const page = await browser.newPage();
+      const page = await getPage(); // 从页面池获取页面，减少创建开销
       
-      // 设置User-Agent和其他必要的header
-      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0');
+      // 移除重复的User-Agent设置，已经在getPage中设置
       
       // 访问UP主空间页面
       await page.goto(`https://space.bilibili.com/${vmid}`, {
-        waitUntil: 'networkidle2',
-        timeout: 60000
+        waitUntil: 'domcontentloaded', // 只等待DOM加载完成，减少等待时间
+        timeout: 30000
       });
       
-      // 等待一段时间确保所有数据加载完成
-      await new Promise(resolve => setTimeout(resolve, 3000));
+
       
       // 尝试从页面中提取数据
       masterpieceData = await page.evaluate(() => {
@@ -404,14 +442,15 @@ async function getUpMasterpiece(vmid) {
         return null;
       });
       
-      await page.close();
+      await recyclePage(page); // 回收页面到池，实现复用
     }
     
     if (!masterpieceData || masterpieceData.code !== 0) {
       throw new Error('Failed to fetch UP masterpiece info');
     }
     
-    console.log('Final UP Masterpiece Data:', JSON.stringify(masterpieceData, null, 2));
+    console.log('Final UP Masterpiece Data retrieved successfully');
+    // 移除详细的JSON日志，提高性能
     
     // 返回原始数据，因为数据结构已经符合要求
     return masterpieceData.data;
@@ -442,7 +481,7 @@ async function getUpInfo(vmid) {
       });
       
       const data = await response.json();
-      console.log('UP Info API Response:', JSON.stringify(data, null, 2));
+      console.log('UP Info API Response status:', data.code);
       
       if (data.code === 0) {
         upData = data;
@@ -461,19 +500,17 @@ async function getUpInfo(vmid) {
         await initBrowser();
       }
       
-      const page = await browser.newPage();
+      const page = await getPage(); // 从页面池获取页面，减少创建开销
       
-      // 设置User-Agent和其他必要的header
-      await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0');
+      // 移除重复的User-Agent设置，已经在getPage中设置
       
       // 访问UP主空间页面
       await page.goto(`https://space.bilibili.com/${vmid}`, {
-        waitUntil: 'networkidle2',
-        timeout: 60000
+        waitUntil: 'domcontentloaded', // 只等待DOM加载完成，减少等待时间
+        timeout: 30000
       });
       
-      // 等待一段时间确保所有数据加载完成
-      await new Promise(resolve => setTimeout(resolve, 3000));
+
       
       // 尝试从页面中提取数据
       upData = await page.evaluate(() => {
@@ -595,14 +632,15 @@ async function getUpInfo(vmid) {
         return null;
       });
       
-      await page.close();
+      await recyclePage(page); // 回收页面到池，实现复用
     }
     
     if (!upData || upData.code !== 0) {
       throw new Error('Failed to fetch UP info');
     }
     
-    console.log('Final UP Info Data:', JSON.stringify(upData, null, 2));
+    console.log('Final UP Info Data retrieved successfully');
+    // 移除详细的JSON日志，提高性能
     
     // 返回UP主信息数据
     return upData.data;
