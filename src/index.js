@@ -259,18 +259,29 @@ async function getVideoInfo(bvid) {
       };
     }
     
+    // 辅助函数：将http URL转换为https
+    const ensureHttps = (url) => {
+      if (typeof url === 'string') {
+        return url.replace(/^http:/, 'https:');
+      }
+      return url;
+    };
+    
     // 处理视频信息
     const videoInfo = {
       bvid: video.bvid || bvid,
       aid: video.aid || video.id || '',
       title: video.title || video.name || '',
       desc: video.desc || video.description || '',
-      pic: video.pic || video.thumbnailUrl || '',
+      pic: ensureHttps(video.pic || video.thumbnailUrl || ''),
       duration: video.duration || (video.durationSeconds || 0),
       pubdate: video.pubdate || (video.uploadDate ? new Date(video.uploadDate).getTime() / 1000 : 0),
       ctime: video.ctime || (video.datePublished ? new Date(video.datePublished).getTime() / 1000 : 0),
       ...stat
     };
+    
+    // 处理作者头像URL
+    owner.face = ensureHttps(owner.face);
     
     const filteredData = {
       video: videoInfo,
