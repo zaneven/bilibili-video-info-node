@@ -3,18 +3,157 @@ const express = require('express');
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+
+// WBI 签名相关常量和变量
+const MIXIN_KEY_ENC_TAB = [
+  46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+  33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
+  61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
+  36, 20, 34, 44, 52
+];
+
+// WBI keys 缓存
+let wbiKeys = null;
+let wbiKeysExpiry = 0;
+const WBI_KEYS_CACHE_DURATION = 24 * 60 * 60 * 1000; // 24小时缓存
+
+// 对 imgKey 和 subKey 进行字符顺序打乱编码，生成 mixin_key
+function getMixinKey(orig) {
+  return MIXIN_KEY_ENC_TAB.map(n => orig[n]).join('').slice(0, 32);
+}
+
+// 计算 MD5 哈希
+function md5(str) {
+  return crypto.createHash('md5').update(str).digest('hex');
+}
+
+// 为请求参数进行 WBI 签名
+function encWbi(params, img_key, sub_key) {
+  const mixin_key = getMixinKey(img_key + sub_key);
+  const curr_time = Math.round(Date.now() / 1000);
+  const chr_filter = /[!'()*]/g;
+
+  // 添加 wts 字段
+  const signParams = { ...params, wts: curr_time };
+
+  // 按照 key 升序排序并编码
+  const query = Object.keys(signParams)
+    .sort()
+    .map(key => {
+      // 过滤 value 中的 "!'()*" 字符
+      const value = signParams[key].toString().replace(chr_filter, '');
+      return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+    })
+    .join('&');
+
+  // 计算 w_rid
+  const w_rid = md5(query + mixin_key);
+
+  return query + '&w_rid=' + w_rid;
+}
+
+// 获取最新的 img_key、sub_key 以及 buvid Cookie
+let buvidCookies = null;
+
+async function getWbiKeys() {
+  const now = Date.now();
+
+  // 检查缓存是否有效
+  if (wbiKeys && buvidCookies && now < wbiKeysExpiry) {
+    console.log('Using cached WBI keys and buvid cookies');
+    return { ...wbiKeys, cookies: buvidCookies };
+  }
+
+  console.log('Fetching new WBI keys and buvid cookies...');
+
+  try {
+    // 首先访问 B站主页获取 buvid3 cookie
+    const homeResponse = await fetch('https://www.bilibili.com/', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+      }
+    });
+
+    // 从响应头中提取 cookies
+    const setCookies = homeResponse.headers.get('set-cookie') || '';
+    console.log('Home page set-cookie header:', setCookies.slice(0, 200));
+
+    // 解析 buvid3 和 buvid4
+    let buvid3 = '';
+    let buvid4 = '';
+
+    const buvid3Match = setCookies.match(/buvid3=([^;]+)/);
+    const buvid4Match = setCookies.match(/buvid4=([^;]+)/);
+
+    if (buvid3Match) {
+      buvid3 = buvid3Match[1];
+    }
+    if (buvid4Match) {
+      buvid4 = buvid4Match[1];
+    }
+
+    // 如果从主页没获取到，尝试使用 fingerprint SPI 接口
+    if (!buvid3) {
+      console.log('Generating buvid3 manually...');
+      // 生成一个符合格式的 buvid3
+      const uuid = crypto.randomUUID().toUpperCase();
+      buvid3 = `${uuid}infoc`;
+    }
+
+    buvidCookies = `buvid3=${buvid3}; buvid4=${buvid4}`;
+    console.log('Buvid cookies obtained:', { buvid3: buvid3.slice(0, 20) + '...', buvid4: buvid4.slice(0, 20) + '...' });
+
+    // 然后获取 WBI keys
+    const navResponse = await fetch('https://api.bilibili.com/x/web-interface/nav', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+        'Referer': 'https://www.bilibili.com/',
+        'Cookie': buvidCookies
+      }
+    });
+
+    const data = await navResponse.json();
+
+    if (data.data && data.data.wbi_img) {
+      const { img_url, sub_url } = data.data.wbi_img;
+
+      // 提取文件名作为 key
+      const img_key = img_url.slice(
+        img_url.lastIndexOf('/') + 1,
+        img_url.lastIndexOf('.')
+      );
+      const sub_key = sub_url.slice(
+        sub_url.lastIndexOf('/') + 1,
+        sub_url.lastIndexOf('.')
+      );
+
+      wbiKeys = { img_key, sub_key };
+      wbiKeysExpiry = now + WBI_KEYS_CACHE_DURATION;
+
+      console.log('WBI keys obtained successfully:', { img_key, sub_key });
+      return { ...wbiKeys, cookies: buvidCookies };
+    }
+
+    throw new Error('Failed to get WBI keys from nav API');
+  } catch (error) {
+    console.error('Error fetching WBI keys:', error);
+    throw error;
+  }
+}
 
 // 读取HTML文件内容
 const HTML_PATH = path.join(__dirname, 'index.html');
 let HTML_PAGE;
 
 try {
-    HTML_PAGE = fs.readFileSync(HTML_PATH, 'utf8');
-    console.log('HTML file loaded successfully');
+  HTML_PAGE = fs.readFileSync(HTML_PATH, 'utf8');
+  console.log('HTML file loaded successfully');
 } catch (error) {
-    console.error('Failed to load HTML file:', error);
-    // 如果无法读取HTML文件，使用一个简单的默认页面
-    HTML_PAGE = '<html><body><h1>HTML file not found</h1></body></html>';
+  console.error('Failed to load HTML file:', error);
+  // 如果无法读取HTML文件，使用一个简单的默认页面
+  HTML_PAGE = '<html><body><h1>HTML file not found</h1></body></html>';
 }
 
 // 创建Express应用
@@ -35,7 +174,7 @@ async function initBrowser() {
       '/usr/bin/chromium',
       '/usr/bin/chromium-browser'
     ];
-    
+
     let executablePath = null;
     for (const path of chromePaths) {
       try {
@@ -47,9 +186,9 @@ async function initBrowser() {
         // 忽略错误
       }
     }
-    
+
     console.log('Found Chrome executable:', executablePath || 'Using Puppeteer default');
-    
+
     // 尝试使用本地Chrome浏览器，如果失败则回退到Puppeteer自动下载
     browser = await puppeteer.launch({
       headless: "new", // 使用新的无头模式
@@ -95,15 +234,30 @@ async function getPage() {
   if (pagePool.length > 0) {
     return pagePool.pop();
   }
-  
+
   if (!browser) {
     await initBrowser();
   }
-  
+
   const page = await browser.newPage();
-  // 设置User-Agent，避免重复设置
+
+  // 设置更完整的浏览器配置，使其更接近真实浏览器
   await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0');
-  
+
+  // 设置视口大小
+  await page.setViewport({ width: 1920, height: 1080 });
+
+  // 设置cookie，模拟已登录状态
+  await page.setCookie({
+    name: 'buvid3',
+    value: 'B3D9A8E0-9F7B-4D5E-8C9A-1234567890AB',
+    domain: '.bilibili.com',
+    path: '/'
+  });
+
+  // 启用JavaScript
+  await page.setJavaScriptEnabled(true);
+
   return page;
 }
 
@@ -129,11 +283,11 @@ async function getVideoInfo(bvid) {
     if (!browser) {
       await initBrowser();
     }
-    
+
     const page = await getPage(); // 从页面池获取页面，减少创建开销
-    
+
     // 移除重复的User-Agent设置，已经在getPage中设置
-    
+
     // 移除网络请求日志，减少性能开销
     // page.on('response', async (response) => {
     //   const url = response.url();
@@ -141,11 +295,11 @@ async function getVideoInfo(bvid) {
     //     console.log('Found video info API response:', url);
     //   }
     // });
-    
+
     // 直接访问视频信息API，不使用page.evaluate，改为在Node.js环境中直接请求
     let videoData = null;
     const apiUrl = `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`;
-    
+
     try {
       console.log('Directly accessing API from Node.js:', apiUrl);
       // 在Node.js环境中直接请求
@@ -153,43 +307,58 @@ async function getVideoInfo(bvid) {
         method: 'GET',
         headers: {
           'Accept': 'application/json, text/plain, */*',
+          'Accept-Encoding': 'gzip, deflate, br, zstd',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'DNT': '1',
+          'Pragma': 'no-cache',
           'Referer': `https://www.bilibili.com/video/${bvid}/`,
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0'
-        }
+          'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="143", "Microsoft Edge";v="143"',
+          'Sec-Ch-Ua-Mobile': '?0',
+          'Sec-Ch-Ua-Platform': '"macOS"',
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'same-site',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'omit',
+        mode: 'cors'
       });
-      
+
       const data = await response.json();
       console.log('Direct API Response status:', data.code);
-      
+
       if (data.code === 0) {
         videoData = data;
       }
     } catch (error) {
       console.error('Direct API request failed:', error);
     }
-    
+
     // 如果直接API请求失败，尝试通过页面加载获取
     if (!videoData || videoData.code !== 0) {
       console.log('Direct API failed, trying page load approach...');
-      
+
       // 访问B站视频页面
       await page.goto(`https://www.bilibili.com/video/${bvid}/`, {
         waitUntil: 'domcontentloaded', // 只等待DOM加载完成，减少等待时间
         timeout: 30000
       });
-      
 
-      
+
+
       // 尝试从页面中提取数据，使用更广泛的方法
       videoData = await page.evaluate(() => {
         console.log('Checking for data in page...');
-        
+
         // 1. 尝试从window.__INITIAL_STATE__获取数据
         if (window.__INITIAL_STATE__) {
           console.log('Found __INITIAL_STATE__');
           const initialState = window.__INITIAL_STATE__;
           console.log('Initial State keys:', Object.keys(initialState));
-          
+
           // 检查videoData或相关属性
           if (initialState.videoData) {
             console.log('Found videoData in __INITIAL_STATE__');
@@ -211,7 +380,7 @@ async function getVideoInfo(bvid) {
             };
           }
         }
-        
+
         // 2. 尝试从script标签中提取JSON-LD数据
         const scriptTags = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
         for (const script of scriptTags) {
@@ -228,7 +397,7 @@ async function getVideoInfo(bvid) {
             // 忽略解析错误
           }
         }
-        
+
         // 3. 尝试从其他可能的全局变量获取数据
         if (window.__data) {
           console.log('Found __data');
@@ -237,7 +406,7 @@ async function getVideoInfo(bvid) {
             data: window.__data
           };
         }
-        
+
         // 4. 尝试从window.__NUXT_DATA__获取数据（如果使用Nuxt框架）
         if (window.__NUXT_DATA__) {
           console.log('Found __NUXT_DATA__');
@@ -246,7 +415,7 @@ async function getVideoInfo(bvid) {
             data: window.__NUXT_DATA__
           };
         }
-        
+
         console.log('No initial state found');
         return null;
       }).catch(e => {
@@ -254,23 +423,23 @@ async function getVideoInfo(bvid) {
         return null;
       });
     }
-    
+
     await recyclePage(page); // 回收页面到池，实现复用
-    
+
     if (!videoData || videoData.code !== 0 || !videoData.data) {
       throw new Error('Failed to fetch video info');
     }
-    
+
     console.log('Final Video Data retrieved successfully');
     // 移除详细的JSON日志，提高性能
-    
+
     // 提取需要的视频和作者信息，添加安全检查
     const video = videoData.data;
-    
+
     // 处理不同数据结构
     let stat = {};
     let owner = {};
-    
+
     // 如果是标准API响应格式
     if (video.stat) {
       stat = video.stat;
@@ -286,7 +455,7 @@ async function getVideoInfo(bvid) {
         share: 0
       };
     }
-    
+
     // 处理作者信息
     if (video.owner) {
       owner = video.owner;
@@ -298,7 +467,7 @@ async function getVideoInfo(bvid) {
         mid: ''
       };
     }
-    
+
     // 辅助函数：将http URL转换为https
     const ensureHttps = (url) => {
       if (typeof url === 'string') {
@@ -306,7 +475,7 @@ async function getVideoInfo(bvid) {
       }
       return url;
     };
-    
+
     // 处理视频信息
     const videoInfo = {
       bvid: video.bvid || bvid,
@@ -319,15 +488,15 @@ async function getVideoInfo(bvid) {
       ctime: video.ctime || (video.datePublished ? new Date(video.datePublished).getTime() / 1000 : 0),
       ...stat
     };
-    
+
     // 处理作者头像URL
     owner.face = ensureHttps(owner.face);
-    
+
     const filteredData = {
       video: videoInfo,
       owner: owner
     };
-    
+
     return filteredData;
   } catch (error) {
     console.error('Error fetching video info:', error);
@@ -342,7 +511,7 @@ async function getUpMasterpiece(vmid) {
     // 直接访问UP主代表作API，在Node.js环境中直接请求
     let masterpieceData = null;
     const apiUrl = `https://api.bilibili.com/x/space/masterpiece?vmid=${vmid}&web_location=333.1387`;
-    
+
     try {
       console.log('Directly accessing UP masterpiece API:', apiUrl);
       // 在Node.js环境中直接请求
@@ -350,47 +519,63 @@ async function getUpMasterpiece(vmid) {
         method: 'GET',
         headers: {
           'Accept': 'application/json, text/plain, */*',
+          'Accept-Encoding': 'gzip, deflate, br, zstd',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6',
+          'Cache-Control': 'no-cache',
+          'Connection': 'keep-alive',
+          'DNT': '1',
+          'Pragma': 'no-cache',
           'Referer': `https://space.bilibili.com/${vmid}`,
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0'
-        }
+          'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="143", "Microsoft Edge";v="143"',
+          'Sec-Ch-Ua-Mobile': '?0',
+          'Sec-Ch-Ua-Platform': '"macOS"',
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'same-site',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        credentials: 'omit',
+        mode: 'cors'
       });
-      
+
       const data = await response.json();
       console.log('UP Masterpiece API Response status:', data.code);
-      
+
       if (data.code === 0) {
         masterpieceData = data;
       }
     } catch (error) {
       console.error('Direct UP masterpiece API request failed:', error);
-      
+
       // 如果直接API请求失败，尝试使用Puppeteer
       if (!browser) {
         await initBrowser();
       }
-      
+
       const page = await getPage(); // 从页面池获取页面，减少创建开销
-      
+
       // 移除重复的User-Agent设置，已经在getPage中设置
-      
+
       // 访问UP主空间页面
       await page.goto(`https://space.bilibili.com/${vmid}`, {
-        waitUntil: 'domcontentloaded', // 只等待DOM加载完成，减少等待时间
+        waitUntil: 'domcontentloaded', // 只等待DOM加载完成
         timeout: 30000
       });
-      
 
-      
+      // 添加短暂等待，确保页面JavaScript执行完成
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
       // 尝试从页面中提取数据
       masterpieceData = await page.evaluate(() => {
         console.log('Checking for UP masterpiece data in page...');
-        
+
         // 1. 尝试从window.__INITIAL_STATE__获取数据
         if (window.__INITIAL_STATE__) {
           console.log('Found __INITIAL_STATE__');
           const initialState = window.__INITIAL_STATE__;
           console.log('Initial State keys:', Object.keys(initialState));
-          
+
           // 检查masterpiece或相关属性
           if (initialState.masterpiece) {
             console.log('Found masterpiece in __INITIAL_STATE__');
@@ -412,7 +597,7 @@ async function getUpMasterpiece(vmid) {
             };
           }
         }
-        
+
         // 2. 尝试从script标签中提取数据
         const scriptTags = Array.from(document.querySelectorAll('script'));
         for (const script of scriptTags) {
@@ -434,24 +619,24 @@ async function getUpMasterpiece(vmid) {
             // 忽略解析错误
           }
         }
-        
+
         console.log('No masterpiece data found in page');
         return null;
       }).catch(e => {
         console.error('Failed to extract masterpiece data from page:', e);
         return null;
       });
-      
+
       await recyclePage(page); // 回收页面到池，实现复用
     }
-    
+
     if (!masterpieceData || masterpieceData.code !== 0) {
       throw new Error('Failed to fetch UP masterpiece info');
     }
-    
+
     console.log('Final UP Masterpiece Data retrieved successfully');
     // 移除详细的JSON日志，提高性能
-    
+
     // 返回原始数据，因为数据结构已经符合要求
     return masterpieceData.data;
   } catch (error) {
@@ -464,190 +649,129 @@ async function getUpMasterpiece(vmid) {
 // 获取UP主个人信息
 async function getUpInfo(vmid) {
   try {
-    // 直接访问UP主信息API，在Node.js环境中直接请求
     let upData = null;
-    const apiUrl = `https://api.bilibili.com/x/space/wbi/acc/info?mid=${vmid}&token=&platform=web&web_location=1550101`;
-    
+
+    // 方案1: 使用 WBI 签名的 API
     try {
-      console.log('Directly accessing UP info API:', apiUrl);
-      // 在Node.js环境中直接请求
-      const response = await fetch(apiUrl, {
+      const { img_key, sub_key, cookies } = await getWbiKeys();
+      const params = { mid: vmid };
+      const signedQuery = encWbi(params, img_key, sub_key);
+
+      const wbiApiUrl = `https://api.bilibili.com/x/space/wbi/acc/info?${signedQuery}`;
+      console.log('Trying WBI signed API:', wbiApiUrl.slice(0, 80) + '...');
+
+      const response = await fetch(wbiApiUrl, {
         method: 'GET',
         headers: {
           'Accept': 'application/json, text/plain, */*',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'Origin': 'https://space.bilibili.com',
           'Referer': `https://space.bilibili.com/${vmid}`,
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0'
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+          'Cookie': cookies
         }
       });
-      
+
       const data = await response.json();
-      console.log('UP Info API Response status:', data.code);
-      
+      console.log('WBI API Response status:', data.code, data.message || '');
+
       if (data.code === 0) {
         upData = data;
       } else {
-        console.warn('API returned non-zero code:', data.code, data.message);
+        console.warn('WBI API failed:', data.code, data.message);
       }
     } catch (error) {
-      console.error('Direct UP info API request failed:', error);
+      console.error('WBI API request error:', error.message);
     }
-    
-    // 如果直接API请求失败，尝试使用Puppeteer
-    if (!upData || upData.code !== 0) {
-      console.log('Direct API failed, trying page load approach...');
-      
-      if (!browser) {
-        await initBrowser();
-      }
-      
-      const page = await getPage(); // 从页面池获取页面，减少创建开销
-      
-      // 移除重复的User-Agent设置，已经在getPage中设置
-      
-      // 访问UP主空间页面
-      await page.goto(`https://space.bilibili.com/${vmid}`, {
-        waitUntil: 'domcontentloaded', // 只等待DOM加载完成，减少等待时间
-        timeout: 30000
-      });
-      
 
-      
-      // 尝试从页面中提取数据
-      upData = await page.evaluate(() => {
-        console.log('Checking for UP info data in page...');
-        
-        // 1. 尝试从window.__INITIAL_STATE__获取数据
-        if (window.__INITIAL_STATE__) {
-          console.log('Found __INITIAL_STATE__');
-          const initialState = window.__INITIAL_STATE__;
-          console.log('Initial State keys:', Object.keys(initialState));
-          
-          // 检查user或相关属性
-          if (initialState.user) {
-            console.log('Found user in __INITIAL_STATE__');
-            return {
-              code: 0,
-              data: initialState.user
-            };
-          } else if (initialState.cards && initialState.cards[0]) {
-            console.log('Found cards in __INITIAL_STATE__');
-            return {
-              code: 0,
-              data: initialState.cards[0]
-            };
-          }
-        }
-        
-        // 2. 尝试从页面元素中提取数据
-        try {
-          // 尝试多种选择器组合，适应不同的页面结构
-          let ownerAvatar = '';
-          let ownerName = '';
-          let ownerId = '';
-          let fans = 0;
-          let videos = 0;
-          let likes = 0;
-          let sign = '';
-          
-          // 尝试获取头像
-          ownerAvatar = document.querySelector('.user-avatar img')?.src || 
-                        document.querySelector('.header-face img')?.src || 
-                        document.querySelector('.up-avatar img')?.src || 
-                        document.querySelector('[class*="avatar"] img')?.src || '';
-          
-          // 尝试获取用户名
-          ownerName = document.querySelector('.username')?.textContent || 
-                      document.querySelector('.name-text')?.textContent || 
-                      document.querySelector('.user-name')?.textContent || 
-                      document.querySelector('[class*="name"]')?.textContent || '';
-          
-          // 尝试获取用户ID
-          ownerId = document.querySelector('.user-id')?.textContent || 
-                    document.querySelector('.up-id')?.textContent || 
-                    document.querySelector('.uid')?.textContent || '';
-          
-          // 尝试获取个人签名
-          sign = document.querySelector('.user-sign')?.textContent || 
-                 document.querySelector('.sign')?.textContent || 
-                 document.querySelector('.intro')?.textContent || '';
-          
-          // 尝试获取统计数据，适应不同的页面结构
-          const statElements = document.querySelectorAll('.stat-item, .data-item, .up-data__content');
-          
-          // 尝试从各种可能的位置提取统计数据
-          if (statElements.length > 0) {
-            statElements.forEach(element => {
-              const text = element.textContent || '';
-              const parent = element.parentElement?.textContent || '';
-              
-              if (text.includes('粉丝') || parent.includes('粉丝')) {
-                fans = text.replace(/[^0-9]/g, '') || '0';
-              } else if (text.includes('视频') || parent.includes('视频')) {
-                videos = text.replace(/[^0-9]/g, '') || '0';
-              } else if (text.includes('获赞') || parent.includes('获赞') || text.includes('点赞')) {
-                likes = text.replace(/[^0-9]/g, '') || '0';
-              }
-            });
-          }
-          
-          // 尝试另一种方式获取统计数据
-          const followerElement = document.querySelector('.follower-count') || 
-                                 document.querySelector('[class*="follower"]') || 
-                                 document.querySelector('[title*="粉丝"]');
-          if (followerElement) {
-            fans = followerElement.textContent.replace(/[^0-9]/g, '') || '0';
-          }
-          
-          const videoElement = document.querySelector('.video-count') || 
-                              document.querySelector('[class*="video"]') || 
-                              document.querySelector('[title*="视频"]');
-          if (videoElement) {
-            videos = videoElement.textContent.replace(/[^0-9]/g, '') || '0';
-          }
-          
-          // 清理数据
-          const cleanId = ownerId.replace(/[\s\nUID:uid:]/g, '') || '';
-          const cleanFans = parseInt(fans) || 0;
-          const cleanVideos = parseInt(videos) || 0;
-          const cleanLikes = parseInt(likes) || 0;
-          
-          return {
-            code: 0,
-            data: {
-              face: ownerAvatar,
-              name: ownerName.trim(),
-              mid: cleanId,
-              sign: sign.trim(),
-              follower: cleanFans,
-              video: cleanVideos,
-              likes: cleanLikes
-            }
-          };
-        } catch (e) {
-          console.error('Failed to extract data from page elements:', e);
-          return null;
-        }
-      }).catch(e => {
-        console.error('Failed to extract UP info from page:', e);
-        return null;
-      });
-      
-      await recyclePage(page); // 回收页面到池，实现复用
-    }
-    
+    // 方案2: WBI API 失败时使用 Puppeteer 从页面提取数据
     if (!upData || upData.code !== 0) {
-      throw new Error('Failed to fetch UP info');
+      console.log('Falling back to Puppeteer for UP info...');
+
+      try {
+        if (!browser) {
+          await initBrowser();
+        }
+
+        const page = await getPage();
+
+        // 存储捕获的 API 数据
+        let capturedData = null;
+
+        // 使用 CDP 监听网络响应
+        const client = await page.target().createCDPSession();
+        await client.send('Network.enable');
+
+        client.on('Network.responseReceived', async (params) => {
+          const url = params.response.url;
+          if (url.includes('/x/space/wbi/acc/info') || url.includes('/x/space/acc/info')) {
+            try {
+              const response = await client.send('Network.getResponseBody', {
+                requestId: params.requestId
+              });
+              const data = JSON.parse(response.body);
+              if (data.code === 0) {
+                capturedData = data.data;
+                console.log('Captured API response:', data.data.name);
+              }
+            } catch (e) {
+              // 可能请求还在进行中
+            }
+          }
+        });
+
+        // 访问 UP 主空间页面，浏览器会自动发起带签名的 API 请求
+        await page.goto(`https://space.bilibili.com/${vmid}`, {
+          waitUntil: 'networkidle2',
+          timeout: 30000
+        });
+
+        // 等待 API 响应被捕获
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        console.log('CDP capture result:', capturedData ? `Found: ${capturedData.name}` : 'null');
+
+        if (capturedData) {
+          upData = { code: 0, data: capturedData };
+          console.log('Got UP info via CDP capture:', capturedData.name || 'unknown');
+        }
+
+        await client.detach();
+        await recyclePage(page);
+
+      } catch (puppeteerError) {
+        console.error('Puppeteer fallback failed:', puppeteerError.message);
+      }
     }
-    
+
+    // 如果所有方法都失败，返回基本结构
+    if (!upData || upData.code !== 0) {
+      console.log('All methods failed, returning basic UP info structure');
+      return {
+        mid: vmid,
+        name: '',
+        face: '',
+        sign: '',
+        follower: 0,
+        video: 0,
+        likes: 0
+      };
+    }
+
     console.log('Final UP Info Data retrieved successfully');
-    // 移除详细的JSON日志，提高性能
-    
-    // 返回UP主信息数据
     return upData.data;
   } catch (error) {
     console.error('Error fetching UP info:', error);
-    console.error('Error stack:', error.stack);
-    throw error;
+    return {
+      mid: vmid,
+      name: '',
+      face: '',
+      sign: '',
+      follower: 0,
+      video: 0,
+      likes: 0
+    };
   }
 }
 
@@ -674,11 +798,11 @@ app.get('/', (req, res) => {
 app.get('/api/video-info', async (req, res) => {
   try {
     const bvid = req.query.bvid;
-    
+
     if (!bvid) {
       return res.status(400).json({ error: 'Missing bvid parameter' });
     }
-    
+
     const videoInfo = await getVideoInfo(bvid);
     res.json(videoInfo);
   } catch (error) {
@@ -690,11 +814,11 @@ app.get('/api/video-info', async (req, res) => {
 app.get('/api/up-masterpiece', async (req, res) => {
   try {
     const vmid = req.query.vmid;
-    
+
     if (!vmid) {
       return res.status(400).json({ error: 'Missing vmid parameter' });
     }
-    
+
     const upInfo = await getUpMasterpiece(vmid);
     res.json(upInfo);
   } catch (error) {
@@ -706,11 +830,11 @@ app.get('/api/up-masterpiece', async (req, res) => {
 app.get('/api/up-info', async (req, res) => {
   try {
     const vmid = req.query.vmid;
-    
+
     if (!vmid) {
       return res.status(400).json({ error: 'Missing vmid parameter' });
     }
-    
+
     const upInfo = await getUpInfo(vmid);
     res.json(upInfo);
   } catch (error) {
@@ -723,14 +847,14 @@ app.get('/proxy-image/:encodedUrl', async (req, res) => {
   try {
     const encodedImageUrl = req.params.encodedUrl;
     const imageUrl = decodeURIComponent(encodedImageUrl);
-    
+
     // 转发请求到原始图片URL
     const response = await fetch(imageUrl);
-    
+
     // 返回图片响应
     res.setHeader('Content-Type', response.headers.get('Content-Type'));
     res.setHeader('Access-Control-Allow-Origin', '*');
-    
+
     // 使用arrayBuffer()替代buffer()，然后转换为Buffer
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);

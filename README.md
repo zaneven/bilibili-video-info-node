@@ -252,17 +252,36 @@ curl "http://localhost:3000/api/up-info?vmid=287291651"
   "name": "京桥刹那",
   "face": "https://i2.hdslb.com/bfs/face/92f95e272607825b1ed909d2a84824c4d9a1ed88.jpg",
   "sign": "春原的专属BGM制作",
+  "follower": 50000,
   "video": 100,
-  "article": 0,
-  "follower": 50000
+  "likes": 0
 }
+```
+
+#### 图片代理
+
+为了解决跨域问题，提供图片代理服务：
+
+```
+http://localhost:3000/proxy-image/<encodedUrl>
+```
+
+#### 使用示例
+
+```bash
+# URL 需要进行 encodeURIComponent 编码
+curl "http://localhost:3000/proxy-image/https%3A%2F%2Fi2.hdslb.com%2Fbfs%2Fface%2F92f95e272607825b1ed909d2a84824c4d9a1ed88.jpg"
 ```
 
 ## 项目结构
 
 ```
 ├── src/
-│   └── index.js          # 主服务器代码
+│   ├── index.js          # 主服务器代码
+│   └── index.html        # Web 界面页面
+├── Dockerfile            # Docker 镜像配置
+├── docker-compose.yml    # Docker Compose 配置
+├── wrangler.toml         # Cloudflare Workers 配置
 ├── package.json          # 项目依赖
 └── README.md             # 说明文档
 ```

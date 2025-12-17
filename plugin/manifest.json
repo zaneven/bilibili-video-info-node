@@ -1,0 +1,56 @@
+{
+    "manifest_version": 3,
+    "name": "Bilibili 视频信息抓取",
+    "version": "1.0.0",
+    "description": "在浏览 B 站时自动抓取视频和作者信息",
+    "icons": {
+        "16": "icons/icon16.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+    },
+    "permissions": [
+        "activeTab",
+        "storage"
+    ],
+    "host_permissions": [
+        "https://*.bilibili.com/*",
+        "https://api.bilibili.com/*",
+        "https://hajimi.fans/*"
+    ],
+    "action": {
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "icons/icon16.png",
+            "48": "icons/icon48.png",
+            "128": "icons/icon128.png"
+        },
+        "default_title": "Bilibili 视频信息"
+    },
+    "background": {
+        "service_worker": "background.js"
+    },
+    "content_scripts": [
+        {
+            "matches": [
+                "https://www.bilibili.com/video/*",
+                "https://www.bilibili.com/list/*",
+                "https://space.bilibili.com/*"
+            ],
+            "js": [
+                "content.js"
+            ],
+            "run_at": "document_start",
+            "all_frames": false
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": [
+                "inject.js"
+            ],
+            "matches": [
+                "https://*.bilibili.com/*"
+            ]
+        }
+    ]
+}
